@@ -72,6 +72,7 @@ tr.pick:hover td{background:var(--bg)}
 tr.sel td{background:var(--buy-bg)}
 .filter{font-size:12px;color:var(--muted);padding:8px 16px;display:flex;gap:8px;align-items:center}
 .toast{position:fixed;right:16px;bottom:16px;z-index:9;display:flex;flex-direction:column;gap:8px;max-width:min(380px,calc(100vw - 32px))}
+.toast div.sold{border-left:4px solid var(--sell)}
 .toast div{background:var(--ink);color:var(--bg);padding:12px 14px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:13px}
 .note{max-width:1240px;margin:0 auto;padding:0 16px 32px;color:var(--muted);font-size:12px}
 @media (prefers-reduced-motion:reduce){.trade.new,.dot.live{animation:none}}
@@ -82,9 +83,10 @@ tr.sel td{background:var(--buy-bg)}
   <h1>Copy Desk<small>34 reliable Polymarket traders</small></h1>
   <div class="status"><span id="dot" class="dot"></span><span id="statusText">Starting…</span></div>
   <div class="controls">
-    <label class="min" for="minBuy">Alert on buys over
+    <label class="min" for="minBuy">Alert on trades over
       <select id="minBuy"><option value="0">any size</option><option value="25">$25</option><option value="50">$50</option><option value="100">$100</option><option value="250">$250</option><option value="1000">$1,000</option></select>
     </label>
+    <button class="btn" id="sellBtn" type="button">Sell alerts on</button>
     <button class="btn" id="soundBtn" type="button">Sound off</button>
     <button class="btn" id="notifyBtn" type="button">Desktop alerts off</button>
   </div>
@@ -106,7 +108,7 @@ tr.sel td{background:var(--buy-bg)}
     </table></div>
   </section>
 </main>
-<p class="note">Checks every wallet about once a minute using Polymarket's public data. Win rate and edge come from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Copying trades is your own call; past results don't guarantee future ones.</p>
+<p class="note">Checks every wallet about once a minute using Polymarket's public data. Win rate and edge come from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
 <div class="toast" id="toast" aria-live="polite"></div>
 
 <script>
@@ -119,7 +121,7 @@ let trades = [];            // merged trade groups
 let lastTrade = {};         // wallet -> ts
 let filterWallet = null, startTs = Math.floor(Date.now()/1000), firstLoadDone = false;
 const store = { get(k,d){try{const v=localStorage.getItem("cd_"+k);return v==null?d:JSON.parse(v)}catch(e){return d}}, set(k,v){try{localStorage.setItem("cd_"+k,JSON.stringify(v))}catch(e){}} };
-let minBuy = store.get("minBuy", 50), soundOn = store.get("sound", false), notifyOn = false;
+let minBuy = store.get("minBuy", 50), soundOn = store.get("sound", false), sellOn = store.get("sell", true), notifyOn = false;
 const $ = id => document.getElementById(id);
 $("minBuy").value = String(minBuy);
 
@@ -172,30 +174,32 @@ async function pollAll(){
 }
 
 function maybeAlert(g){
-  if (g.side!=="BUY" || g.usd < minBuy || g.alerted) return;
+  if (g.usd < minBuy || g.alerted) return;
+  if (g.side==="SELL" && !sellOn) return;
   g.alerted = true;
   const who = byWallet[g.w]?.n || g.w.slice(0,8);
-  const msg = `${who} bought ${money(g.usd)} of “${g.outcome}” at ${Math.round(g.price*100)}¢ on ${g.title}`;
-  toast(msg);
-  if (soundOn) beep();
+  const verb = g.side==="SELL" ? "sold" : "bought";
+  const msg = `${who} ${verb} ${money(g.usd)} of “${g.outcome}” at ${Math.round(g.price*100)}¢ on ${g.title}`;
+  toast(msg, g.side);
+  if (soundOn) beep(g.side==="SELL"?440:880);
   if (notifyOn && "Notification" in window && Notification.permission==="granted"){
-    try{ new Notification("New buy: "+who, {body: msg.replace(who+" ","")}); }catch(e){}
+    try{ new Notification((g.side==="SELL"?"Sold: ":"New buy: ")+who, {body: msg.replace(who+" ","")}); }catch(e){}
   }
   unread++; document.title = `(${unread}) Copy Desk`;
 }
 let unread = 0;
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){unread=0;document.title="Polymarket Copy Desk";} });
 
-function toast(msg){
-  const el = document.createElement("div"); el.textContent = msg; $("toast").prepend(el);
+function toast(msg, side){
+  const el = document.createElement("div"); el.textContent = msg; if (side==="SELL") el.className="sold"; $("toast").prepend(el);
   setTimeout(()=>el.remove(), 12000);
   while ($("toast").children.length>4) $("toast").lastChild.remove();
 }
 let actx=null;
-function beep(){
+function beep(freq=880){
   try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)();
     const o=actx.createOscillator(), g=actx.createGain(); o.connect(g); g.connect(actx.destination);
-    o.frequency.value=880; g.gain.setValueAtTime(.15,actx.currentTime); g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+.4);
+    o.frequency.value=freq; g.gain.setValueAtTime(.15,actx.currentTime); g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+.4);
     o.start(); o.stop(actx.currentTime+.4);
   }catch(e){}
 }
@@ -241,9 +245,11 @@ $("wl").addEventListener("keydown", e=>{ if(e.key==="Enter"){ const tr=e.target.
 $("clearFilter").onclick = ()=>{ filterWallet=null; render(); };
 $("minBuy").onchange = e=>{ minBuy=+e.target.value; store.set("minBuy",minBuy); };
 function paintButtons(){
+  $("sellBtn").textContent = sellOn?"Sell alerts on":"Sell alerts off"; $("sellBtn").classList.toggle("on",sellOn);
   $("soundBtn").textContent = soundOn?"Sound on":"Sound off"; $("soundBtn").classList.toggle("on",soundOn);
   $("notifyBtn").textContent = notifyOn?"Desktop alerts on":"Desktop alerts off"; $("notifyBtn").classList.toggle("on",notifyOn);
 }
+$("sellBtn").onclick = ()=>{ sellOn=!sellOn; store.set("sell",sellOn); paintButtons(); };
 $("soundBtn").onclick = ()=>{ soundOn=!soundOn; store.set("sound",soundOn); if(soundOn) beep(); paintButtons(); };
 $("notifyBtn").onclick = async ()=>{
   if (notifyOn){ notifyOn=false; paintButtons(); return; }
