@@ -38,8 +38,8 @@ h1 small{display:block;font:500 12px var(--body);color:var(--muted);letter-spaci
 .btn.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 label.min{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
 label.min select{padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
-main{max-width:1240px;margin:0 auto;padding:20px 16px 48px;display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:20px}
-@media (max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
+main{max-width:1240px;margin:0 auto;padding:20px 16px 48px;display:grid;grid-template-columns:minmax(0,1fr) 500px;gap:20px}
+@media (max-width:1000px){main{grid-template-columns:minmax(0,1fr)}}
 section{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:0}
 .sec-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
 h2{font:700 16px var(--display);margin:0}
@@ -79,6 +79,7 @@ tr.sel td{background:var(--buy-bg)}
 .toast div.sold{border-left:4px solid var(--sell)}
 .toast div{background:var(--ink);color:var(--bg);padding:12px 14px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:13px}
 .note{max-width:1240px;margin:0 auto;padding:0 16px 32px;color:var(--muted);font-size:12px}
+@media (max-width:520px){#wl td:last-child,thead th:last-child{display:none} td:first-child{max-width:100px} td,th{padding:8px 6px}}
 @media (prefers-reduced-motion:reduce){.trade.new,.dot.live{animation:none}}
 </style>
 </head>
@@ -107,12 +108,12 @@ tr.sel td{background:var(--buy-bg)}
   <section aria-labelledby="wlH">
     <div class="sec-h"><h2 id="wlH">Watchlist</h2><span>tap a name to filter</span></div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Trader</th><th title="Share of resolved bets won">Win</th><th title="All-time profit on Polymarket">Profit</th><th title="Profit over the last 30 days">30d</th><th>Last</th></tr></thead>
+      <thead><tr><th>Trader</th><th title="Share of resolved bets won">Win</th><th title="All-time profit on Polymarket">Profit</th><th title="Profit over the last 30 days">30d</th><th title="Settled bets of $10+ in the last 30 days that made money, out of all of them">30d hits</th><th>Last</th></tr></thead>
       <tbody id="wl"></tbody>
     </table></div>
   </section>
 </main>
-<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
+<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. 30d hits counts settled bets of $10 or more in the last 30 days that made money, out of all of them. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
 <div class="toast" id="toast" aria-live="polite"></div>
 
 <script>
@@ -124,6 +125,42 @@ const profit = {};   // wallet -> {all, month} in USD, from Polymarket's leaderb
 function pfText(x){ const a=Math.abs(x); const v=a>=1e6?(a/1e6).toFixed(1)+"M":a>=1000?(a/1000).toFixed(a>=10000?0:1)+"k":a.toFixed(0); return (x<0?"−$":"+$")+v; }
 function pfChip(x){ return x==null?"":`<span class="pf ${x<0?"down":"up"}" title="All-time profit">${pfText(x)}</span>`; }
 function pfCell(x){ return x==null?"<td>–</td>":`<td class="${x<0?"down":"up"}">${pfText(x)}</td>`; }
+const hits = {};     // wallet -> {won, total} over settled bets of $10+ in the last 30 days
+function hitCell(h){ if(!h) return "<td>–</td>"; if(!h.total) return "<td>0/0</td>"; const r=h.won/h.total; return `<td class="${r>=0.5?"up":"down"}" title="${Math.round(r*100)}% of settled bets made money">${h.won}/${h.total}</td>`; }
+function hitChip(h){ if(!h||!h.total) return ""; const r=h.won/h.total; return `<span class="pf ${r>=0.5?"up":"down"}" title="Last 30 days: ${h.won} of ${h.total} settled bets made money">30d ${h.won}/${h.total}</span>`; }
+async function walkPositions(w, status, start, maxPages){
+  let rows=[], cursor=null;
+  for (let i=0;i<maxPages;i++){
+    const q = cursor ? `user=${w}&cursor=${encodeURIComponent(cursor)}` : `user=${w}&status=${status}&start=${start}&limit=1000&sort_by=TIMESTAMP`;
+    const r = await fetch(`https://data-api.polymarket.com/v2/positions?${q}`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); rows = rows.concat(d.data||[]);
+    cursor = d.pagination?.next_cursor; if (!cursor) break;
+  }
+  return rows;
+}
+async function loadHits(){
+  const start = Math.floor(Date.now()/1000) - 30*86400;
+  const queue = WALLETS.map(w=>w.w);
+  async function worker(){
+    while(queue.length){
+      const w = queue.shift();
+      try{
+        const [closed, held] = await Promise.all([walkPositions(w,"CLOSED",start,3), walkPositions(w,"REDEEMABLE",start,2)]);
+        const seenTok = new Set(); let won=0, total=0;
+        for (const x of closed.concat(held)){
+          if (seenTok.has(x.token_id)) continue; seenTok.add(x.token_id);
+          if ((x.avg_price||0)*(x.total_size||0) < 10) continue;
+          total++;
+          if (x.status==="CLOSED" ? (x.realized_pnl||0) > 0 : (x.current_price||0) >= 0.5) won++;
+        }
+        hits[w] = {won, total};
+      }catch(e){}
+    }
+  }
+  await Promise.all(Array.from({length:3}, worker));
+  render();
+}
 async function loadProfit(){
   const queue = WALLETS.map(w=>w.w);
   async function worker(){
@@ -250,7 +287,7 @@ function render(){
     return `<li class="trade${t.isNew?" new":""}">
       <div class="side ${t.side}">${t.side}</div>
       <div class="t-main">
-        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span>${pfChip(profit[t.w]?.all)}</div>
+        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span>${pfChip(profit[t.w]?.all)}${hitChip(hits[t.w])}</div>
         <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
         <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
       </div>
@@ -259,7 +296,7 @@ function render(){
   }).join("");
   for (const t of trades) t.isNew=false;
   $("wl").innerHTML = WALLETS.map(w=>`<tr class="pick${filterWallet===w.w?" sel":""}" data-w="${w.w}" tabindex="0">
-      <td title="${esc(w.n)}">${esc(w.n)}</td><td>${Math.round(w.wr*100)}%</td>${pfCell(profit[w.w]?.all)}${pfCell(profit[w.w]?.month)}<td>${lastTrade[w.w]?ago(lastTrade[w.w]):"–"}</td></tr>`).join("");
+      <td title="${esc(w.n)}">${esc(w.n)}</td><td>${Math.round(w.wr*100)}%</td>${pfCell(profit[w.w]?.all)}${pfCell(profit[w.w]?.month)}${hitCell(hits[w.w])}<td>${lastTrade[w.w]?ago(lastTrade[w.w]):"–"}</td></tr>`).join("");
 }
 
 $("wl").addEventListener("click", e=>{ const tr=e.target.closest("tr[data-w]"); if(!tr) return; filterWallet = filterWallet===tr.dataset.w?null:tr.dataset.w; render(); });
@@ -286,6 +323,7 @@ if ("Notification" in window && Notification.permission==="granted") notifyOn = 
 paintButtons(); render();
 pollAll(); setInterval(pollAll, POLL_MS);
 loadProfit(); setInterval(loadProfit, 10*60000);
+loadHits(); setInterval(loadHits, 15*60000);
 setInterval(()=>{ if(firstLoadDone) render(); }, 30000);
 </script>
 </body>
