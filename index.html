@@ -10,13 +10,13 @@
 /* Layout: sticky status bar, then a two-column desk: live tape (wide) + watchlist (narrow); stacks on phones. */
 :root{
   --bg:#eef0f3; --panel:#ffffff; --ink:#18202b; --muted:#5b6676; --line:#d8dde4;
-  --accent:#2747d6; --buy:#11845b; --buy-bg:#e3f4ec; --sell:#b4432c; --sell-bg:#f8e7e2; --flash:#fff3c4;
+  --accent:#2747d6; --on-accent:#ffffff; --buy:#11845b; --buy-bg:#e3f4ec; --sell:#b4432c; --sell-bg:#f8e7e2; --flash:#fff3c4;
   --display:"Familjen Grotesk",system-ui,sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#10151d; --panel:#171e28; --ink:#e6eaf0; --muted:#93a0b2; --line:#283241;
-  --accent:#7d93ff; --buy:#45c995; --buy-bg:#14302a; --sell:#f08a72; --sell-bg:#3a201b; --flash:#3b3415; color-scheme:dark}}
+  --accent:#7d93ff; --on-accent:#10151d; --buy:#45c995; --buy-bg:#14302a; --sell:#f08a72; --sell-bg:#3a201b; --flash:#3b3415; color-scheme:dark}}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--body)}
@@ -35,10 +35,10 @@ h1 small{display:block;font:500 12px var(--body);color:var(--muted);letter-spaci
 .controls{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .btn{border:1px solid var(--line);background:var(--bg);padding:6px 12px;border-radius:6px;cursor:pointer}
 .btn:hover{border-color:var(--accent)}
-.btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 label.min{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
 label.min select{padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
-main{max-width:1240px;margin:0 auto;padding:20px 16px 48px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px}
+main{max-width:1240px;margin:0 auto;padding:20px 16px 48px;display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:20px}
 @media (max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
 section{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:0}
 .sec-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
@@ -55,6 +55,10 @@ ol.feed{list-style:none;margin:0;padding:0}
 .side.SELL{background:var(--sell-bg);color:var(--sell)}
 .t-main{min-width:0}
 .t-who{font-weight:600}
+.pf{font:500 12px var(--mono);padding:1px 6px;border-radius:4px;margin-left:6px;white-space:nowrap}
+.pf.up{background:var(--buy-bg);color:var(--buy)}
+.pf.down{background:var(--sell-bg);color:var(--sell)}
+td.up{color:var(--buy)} td.down{color:var(--sell)}
 .t-who .wr{font:400 12px var(--mono);color:var(--muted);margin-left:6px}
 .t-q{color:var(--ink);overflow-wrap:anywhere}
 .t-q b{font-weight:600}
@@ -63,10 +67,10 @@ ol.feed{list-style:none;margin:0;padding:0}
 .t-num small{display:block;font-size:12px;color:var(--muted);font-weight:400}
 .t-num a{font:500 12px var(--body)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
-th{font:500 11px var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{white-space:nowrap;font:500 11px var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left}
-td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;font:13px var(--mono)}
-td:first-child{font-family:var(--body);font-weight:500;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td{padding:8px 8px;white-space:nowrap;border-bottom:1px solid var(--line);text-align:right;font:13px var(--mono)}
+td:first-child{font-family:var(--body);font-weight:500;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 tr.pick{cursor:pointer}
 tr.pick:hover td{background:var(--bg)}
 tr.sel td{background:var(--buy-bg)}
@@ -103,12 +107,12 @@ tr.sel td{background:var(--buy-bg)}
   <section aria-labelledby="wlH">
     <div class="sec-h"><h2 id="wlH">Watchlist</h2><span>tap a name to filter</span></div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Trader</th><th title="Share of resolved bets won">Win</th><th title="Win rate minus average price paid, in points">Edge</th><th>Last trade</th></tr></thead>
+      <thead><tr><th>Trader</th><th title="Share of resolved bets won">Win</th><th title="All-time profit on Polymarket">Profit</th><th title="Profit over the last 30 days">30d</th><th>Last</th></tr></thead>
       <tbody id="wl"></tbody>
     </table></div>
   </section>
 </main>
-<p class="note">Checks every wallet about once a minute using Polymarket's public data. Win rate and edge come from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
+<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
 <div class="toast" id="toast" aria-live="polite"></div>
 
 <script>
@@ -116,6 +120,24 @@ const WALLETS = [{"r":1,"n":"0x94d6\u2026f121","w":"0x94d6530c8d66cf9a789c7f2e6a
 const API = "https://data-api.polymarket.com/v2/trades";
 const POLL_MS = 60000, MERGE_S = 180, KEEP = 400;
 const byWallet = Object.fromEntries(WALLETS.map(w => [w.w, w]));
+const profit = {};   // wallet -> {all, month} in USD, from Polymarket's leaderboard
+function pfText(x){ const a=Math.abs(x); const v=a>=1e6?(a/1e6).toFixed(1)+"M":a>=1000?(a/1000).toFixed(a>=10000?0:1)+"k":a.toFixed(0); return (x<0?"−$":"+$")+v; }
+function pfChip(x){ return x==null?"":`<span class="pf ${x<0?"down":"up"}" title="All-time profit">${pfText(x)}</span>`; }
+function pfCell(x){ return x==null?"<td>–</td>":`<td class="${x<0?"down":"up"}">${pfText(x)}</td>`; }
+async function loadProfit(){
+  const queue = WALLETS.map(w=>w.w);
+  async function worker(){
+    while(queue.length){
+      const w = queue.shift();
+      try{
+        const [a,m] = await Promise.all(["all","month"].map(t=>fetch(`https://data-api.polymarket.com/v2/leaderboard?user=${w}&time_period=${t}`).then(r=>r.ok?r.json():null)));
+        profit[w] = {all: a?.data?.pnl ?? null, month: m?.data?.pnl ?? null};
+      }catch(e){}
+    }
+  }
+  await Promise.all(Array.from({length:4}, worker));
+  render();
+}
 const seen = new Set();
 let trades = [];            // merged trade groups
 let lastTrade = {};         // wallet -> ts
@@ -228,7 +250,7 @@ function render(){
     return `<li class="trade${t.isNew?" new":""}">
       <div class="side ${t.side}">${t.side}</div>
       <div class="t-main">
-        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span></div>
+        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span>${pfChip(profit[t.w]?.all)}</div>
         <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
         <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
       </div>
@@ -237,7 +259,7 @@ function render(){
   }).join("");
   for (const t of trades) t.isNew=false;
   $("wl").innerHTML = WALLETS.map(w=>`<tr class="pick${filterWallet===w.w?" sel":""}" data-w="${w.w}" tabindex="0">
-      <td title="${esc(w.n)}">${esc(w.n)}</td><td>${Math.round(w.wr*100)}%</td><td>+${w.e.toFixed(0)}</td><td>${lastTrade[w.w]?ago(lastTrade[w.w]):"–"}</td></tr>`).join("");
+      <td title="${esc(w.n)}">${esc(w.n)}</td><td>${Math.round(w.wr*100)}%</td>${pfCell(profit[w.w]?.all)}${pfCell(profit[w.w]?.month)}<td>${lastTrade[w.w]?ago(lastTrade[w.w]):"–"}</td></tr>`).join("");
 }
 
 $("wl").addEventListener("click", e=>{ const tr=e.target.closest("tr[data-w]"); if(!tr) return; filterWallet = filterWallet===tr.dataset.w?null:tr.dataset.w; render(); });
@@ -263,6 +285,7 @@ $("notifyBtn").onclick = async ()=>{
 if ("Notification" in window && Notification.permission==="granted") notifyOn = true;
 paintButtons(); render();
 pollAll(); setInterval(pollAll, POLL_MS);
+loadProfit(); setInterval(loadProfit, 10*60000);
 setInterval(()=>{ if(firstLoadDone) render(); }, 30000);
 </script>
 </body>
