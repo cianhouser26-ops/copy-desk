@@ -10,13 +10,13 @@
 /* Layout: sticky status bar, then a two-column desk: live tape (wide) + watchlist (narrow); stacks on phones. */
 :root{
   --bg:#eef0f3; --panel:#ffffff; --ink:#18202b; --muted:#5b6676; --line:#d8dde4;
-  --accent:#2747d6; --on-accent:#ffffff; --buy:#11845b; --buy-bg:#e3f4ec; --sell:#b4432c; --sell-bg:#f8e7e2; --flash:#fff3c4;
+  --accent:#2747d6; --on-accent:#ffffff; --buy:#11845b; --buy-bg:#e3f4ec; --sell:#b4432c; --sell-bg:#f8e7e2; --flash:#fff3c4; --big:#fff1a8; --big-ink:#6b5200; --big-edge:#e0b400;
   --display:"Familjen Grotesk",system-ui,sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#10151d; --panel:#171e28; --ink:#e6eaf0; --muted:#93a0b2; --line:#283241;
-  --accent:#7d93ff; --on-accent:#10151d; --buy:#45c995; --buy-bg:#14302a; --sell:#f08a72; --sell-bg:#3a201b; --flash:#3b3415; color-scheme:dark}}
+  --accent:#7d93ff; --on-accent:#10151d; --buy:#45c995; --buy-bg:#14302a; --sell:#f08a72; --sell-bg:#3a201b; --flash:#3b3415; --big:#3d3410; --big-ink:#ffd84d; --big-edge:#c9a100; color-scheme:dark}}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--body)}
@@ -48,16 +48,21 @@ h2{font:700 16px var(--display);margin:0}
 .empty{padding:32px 16px;color:var(--muted);text-align:center}
 ol.feed{list-style:none;margin:0;padding:0}
 .trade{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:4px 12px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:start}
+.trade.big{background:var(--big);box-shadow:inset 4px 0 0 var(--big-edge)}
+.bigtag{font:600 11px var(--mono);color:var(--big-ink);background:var(--big);border:1px solid var(--big-edge);border-radius:4px;padding:1px 6px;margin-left:6px;white-space:nowrap}
+.trade.big .t-num{color:var(--big-ink)}
 .trade.new{animation:flash 6s ease-out}
 @keyframes flash{0%{background:var(--flash)}100%{background:transparent}}
 .side{font:500 11px var(--mono);letter-spacing:.06em;text-align:center;padding:3px 0;border-radius:4px}
 .side.BUY{background:var(--buy-bg);color:var(--buy)}
 .side.SELL{background:var(--sell-bg);color:var(--sell)}
 .t-main{min-width:0}
-.t-who{font-weight:600}
+.t-who{font-weight:600;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px}
+.t-who .pf,.t-who .bigtag,.t-who .wr{margin-left:0}
 .pf{font:500 12px var(--mono);padding:1px 6px;border-radius:4px;margin-left:6px;white-space:nowrap}
 .pf.up{background:var(--buy-bg);color:var(--buy)}
 .pf.down{background:var(--sell-bg);color:var(--sell)}
+.pct{font-size:11px;opacity:.75;margin-left:5px}
 td.up{color:var(--buy)} td.down{color:var(--sell)}
 .t-who .wr{font:400 12px var(--mono);color:var(--muted);margin-left:6px}
 .t-q{color:var(--ink);overflow-wrap:anywhere}
@@ -113,7 +118,7 @@ tr.sel td{background:var(--buy-bg)}
     </table></div>
   </section>
 </main>
-<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. 30d hits counts settled bets of $10 or more in the last 30 days that made money, out of all of them. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
+<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. Yellow rows are buys at least 3 times bigger than that trader's usual bet (and $100 or more, at 95¢ or less), which can mean they're very confident. 30d hits counts settled bets of $10 or more in the last 30 days that made money, out of all of them. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
 <div class="toast" id="toast" aria-live="polite"></div>
 
 <script>
@@ -122,12 +127,14 @@ const API = "https://data-api.polymarket.com/v2/trades";
 const POLL_MS = 60000, MERGE_S = 180, KEEP = 400;
 const byWallet = Object.fromEntries(WALLETS.map(w => [w.w, w]));
 const profit = {};   // wallet -> {all, month} in USD, from Polymarket's leaderboard
+// A buy counts as "big" when it is at least 3x the trader's typical (median) bet, at least $100, and priced 95¢ or less (near-certain 99¢ buys are just parking cash).
+function bigX(t){ const w=byWallet[t.w]; if(!w||t.side!=="BUY"||!w.s) return 0; const x=t.usd/w.s; return (x>=3 && t.usd>=100 && t.price<=0.95) ? x : 0; }
 function pfText(x){ const a=Math.abs(x); const v=a>=1e6?(a/1e6).toFixed(1)+"M":a>=1000?(a/1000).toFixed(a>=10000?0:1)+"k":a.toFixed(0); return (x<0?"−$":"+$")+v; }
 function pfChip(x){ return x==null?"":`<span class="pf ${x<0?"down":"up"}" title="All-time profit">${pfText(x)}</span>`; }
 function pfCell(x){ return x==null?"<td>–</td>":`<td class="${x<0?"down":"up"}">${pfText(x)}</td>`; }
 const hits = {};     // wallet -> {won, total} over settled bets of $10+ in the last 30 days
-function hitCell(h){ if(!h) return "<td>–</td>"; if(!h.total) return "<td>0/0</td>"; const r=h.won/h.total; return `<td class="${r>=0.5?"up":"down"}" title="${Math.round(r*100)}% of settled bets made money">${h.won}/${h.total}</td>`; }
-function hitChip(h){ if(!h||!h.total) return ""; const r=h.won/h.total; return `<span class="pf ${r>=0.5?"up":"down"}" title="Last 30 days: ${h.won} of ${h.total} settled bets made money">30d ${h.won}/${h.total}</span>`; }
+function hitCell(h){ if(!h) return "<td>–</td>"; if(!h.total) return "<td>0/0</td>"; const r=h.won/h.total; return `<td class="${r>=0.5?"up":"down"}" title="${Math.round(r*100)}% of settled bets made money">${h.won}/${h.total}<span class="pct">${Math.round(r*100)}%</span></td>`; }
+function hitChip(h){ if(!h||!h.total) return ""; const r=h.won/h.total; return `<span class="pf ${r>=0.5?"up":"down"}" title="Last 30 days: ${h.won} of ${h.total} settled bets made money">30d ${h.won}/${h.total} · ${Math.round(r*100)}%</span>`; }
 async function walkPositions(w, status, start, maxPages){
   let rows=[], cursor=null;
   for (let i=0;i<maxPages;i++){
@@ -238,7 +245,8 @@ function maybeAlert(g){
   g.alerted = true;
   const who = byWallet[g.w]?.n || g.w.slice(0,8);
   const verb = g.side==="SELL" ? "sold" : "bought";
-  const msg = `${who} ${verb} ${money(g.usd)} of “${g.outcome}” at ${Math.round(g.price*100)}¢ on ${g.title}`;
+  const bx = bigX(g);
+  const msg = `${bx?`BIG BET (${bx.toFixed(1)}× usual) · `:""}${who} ${verb} ${money(g.usd)} of “${g.outcome}” at ${Math.round(g.price*100)}¢ on ${g.title}`;
   toast(msg, g.side);
   if (soundOn) beep(g.side==="SELL"?440:880);
   if (notifyOn && "Notification" in window && Notification.permission==="granted"){
@@ -284,10 +292,11 @@ function render(){
   $("feed").innerHTML = list.slice(0,150).map(t=>{
     const w = byWallet[t.w] || {n:t.w.slice(0,8), wr:0};
     const url = t.slug ? `https://polymarket.com/event/${encodeURIComponent(t.slug)}` : `https://polymarket.com/profile/${t.w}`;
-    return `<li class="trade${t.isNew?" new":""}">
+    const bx = bigX(t);
+    return `<li class="trade${t.isNew?" new":""}${bx?" big":""}">
       <div class="side ${t.side}">${t.side}</div>
       <div class="t-main">
-        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span>${pfChip(profit[t.w]?.all)}${hitChip(hits[t.w])}</div>
+        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span>${bx?`<span class="bigtag" title="This buy is ${bx.toFixed(1)} times their usual bet of ${money(w.s)}">${bx>=10?Math.round(bx):bx.toFixed(1)}× usual</span>`:""}${pfChip(profit[t.w]?.all)}${hitChip(hits[t.w])}</div>
         <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
         <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
       </div>
