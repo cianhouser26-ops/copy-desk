@@ -70,6 +70,8 @@ td.up{color:var(--buy)} td.down{color:var(--sell)}
 .t-meta{font-size:12px;color:var(--muted)}
 .t-num{text-align:right;font:500 14px var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 .t-num small{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.now{display:block;font:500 12px var(--mono);margin-top:2px}
+.now.up{color:var(--buy)} .now.down{color:var(--sell)} .now.flat{color:var(--muted)}
 .t-num a{font:500 12px var(--body)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th{white-space:nowrap;font:500 11px var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -121,7 +123,7 @@ tr.sel td{background:var(--buy-bg)}
     </table></div>
   </section>
 </main>
-<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. Yellow rows are buys at least 3 times bigger than that trader's usual bet (and $100 or more, at 95¢ or less), which can mean they're very confident. Traders whose 30d hit rate is below your limit are hidden and don't alert you. 30d hits counts settled bets of $10 or more in the last 30 days that made money, out of all of them. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
+<p class="note">Checks every wallet about once a minute using Polymarket's public data. Profit is each trader's Polymarket profit, refreshed every 10 minutes. Yellow rows are buys at least 3 times bigger than that trader's usual bet (and $100 or more, at 95¢ or less), which can mean they're very confident. Each trade shows the price now and how much it's up or down since the trader got in. Traders whose 30d hit rate is below your limit are hidden and don't alert you. 30d hits counts settled bets of $10 or more in the last 30 days that made money, out of all of them. Win rate comes from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Sell alerts tell you when a trader is getting out, so you can sell your copy too. Copying trades is your own call; past results don't guarantee future ones.</p>
 <div class="toast" id="toast" aria-live="polite"></div>
 
 <script>
@@ -134,6 +136,41 @@ const profit = {};   // wallet -> {all, month} in USD, from Polymarket's leaderb
 function bigX(t){ const w=byWallet[t.w]; if(!w||t.side!=="BUY"||!w.s) return 0; const x=t.usd/w.s; return (x>=3 && t.usd>=100 && t.price<=0.95) ? x : 0; }
 // Hide a trader whose last-30-day hit rate is under the chosen limit (needs 10+ settled bets to judge).
 function hidden(w){ const h=hits[w]; return !!(minHit && h && h.total>=10 && h.won/h.total*100 < minHit); }
+// Live price of each outcome token: {mid} from the order book, or {final} once the market has settled.
+const live = {};
+function nowHtml(t){
+  const L = live[t.token]; if (!L) return "";
+  if (L.final != null){
+    const won = L.final >= 0.5;
+    if (t.side==="SELL") return `<span class="now flat">Settled ${won?"Yes":"No"} for this side</span>`;
+    return `<span class="now ${won?"up":"down"}">${won?"Won ✓ paid $1":"Lost, worth 0¢"}</span>`;
+  }
+  if (L.mid == null) return "";
+  const now = L.mid*100, chg = (L.mid - t.price)/t.price*100;
+  if (t.side==="SELL") return `<span class="now flat">Now ${now.toFixed(1)}¢</span>`;
+  const cls = Math.abs(chg)<0.5 ? "flat" : chg>0 ? "up" : "down";
+  return `<span class="now ${cls}" title="Price now vs what they paid">Now ${now.toFixed(1)}¢ ${chg>=0?"▲ +":"▼ "}${chg.toFixed(1)}%</span>`;
+}
+async function loadLive(){
+  const toks = [...new Set(trades.filter(t=>t.usd>=10 && !hidden(t.w)).slice(0,150).map(t=>t.token))];
+  for (let i=0;i<toks.length;i+=100){
+    const chunk = toks.slice(i,i+100);
+    try{
+      const r = await fetch("https://clob.polymarket.com/midpoints",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(chunk.map(t=>({token_id:t})))});
+      if (r.ok){ const d = await r.json(); for (const t of chunk){ if (d[t]!=null) live[t] = {mid:+d[t]}; } }
+    }catch(e){}
+  }
+  // Tokens without an order book are usually settled: look up the final price.
+  const missing = toks.filter(t=>!live[t] || live[t].final==null && live[t].mid==null).slice(0,40);
+  await Promise.all(missing.map(async t=>{
+    try{
+      const r = await fetch(`https://data-api.polymarket.com/v2/tokens?token_id=${t}`);
+      const x = (await r.json()).data?.[0];
+      if (x?.resolved && x.final_price!=null) live[t] = {final:+x.final_price};
+    }catch(e){}
+  }));
+  render();
+}
 function pfText(x){ const a=Math.abs(x); const v=a>=1e6?(a/1e6).toFixed(1)+"M":a>=1000?(a/1000).toFixed(a>=10000?0:1)+"k":a.toFixed(0); return (x<0?"−$":"+$")+v; }
 function pfChip(x){ return x==null?"":`<span class="pf ${x<0?"down":"up"}" title="All-time profit">${pfText(x)}</span>`; }
 function pfCell(x){ return x==null?"<td>–</td>":`<td class="${x<0?"down":"up"}">${pfText(x)}</td>`; }
@@ -242,6 +279,7 @@ async function pollAll(){
   firstLoadDone = true;
   setStatus(ok, fail);
   render();
+  loadLive();
 }
 
 function maybeAlert(g){
@@ -307,7 +345,7 @@ function render(){
         <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
         <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
       </div>
-      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small><a href="${url}" target="_blank" rel="noopener">Open market</a></div>
+      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small>${nowHtml(t)}<a href="${url}" target="_blank" rel="noopener">Open market</a></div>
     </li>`;
   }).join("");
   for (const t of trades) t.isNew=false;
