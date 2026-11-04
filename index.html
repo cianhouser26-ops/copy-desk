@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Polymarket Copy Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky status bar, then a two-column desk: live tape (wide) + watchlist (narrow); stacks on phones. */
+:root{
+  --bg:#eef0f3; --panel:#ffffff; --ink:#18202b; --muted:#5b6676; --line:#d8dde4;
+  --accent:#2747d6; --buy:#11845b; --buy-bg:#e3f4ec; --sell:#b4432c; --sell-bg:#f8e7e2; --flash:#fff3c4;
+  --display:"Familjen Grotesk",system-ui,sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#10151d; --panel:#171e28; --ink:#e6eaf0; --muted:#93a0b2; --line:#283241;
+  --accent:#7d93ff; --buy:#45c995; --buy-bg:#14302a; --sell:#f08a72; --sell-bg:#3a201b; --flash:#3b3415; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--body)}
+a{color:var(--accent)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bar{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar-in{max-width:1240px;margin:0 auto;padding:12px 16px;display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center}
+h1{font:700 22px/1.1 var(--display);margin:0;letter-spacing:-.01em}
+h1 small{display:block;font:500 12px var(--body);color:var(--muted);letter-spacing:0}
+.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.dot.live{background:var(--buy);box-shadow:0 0 0 0 var(--buy);animation:pulse 2s infinite}
+.dot.err{background:var(--sell)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--buy) 60%,transparent)}100%{box-shadow:0 0 0 8px transparent}}
+.controls{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--bg);padding:6px 12px;border-radius:6px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+label.min{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+label.min select{padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
+main{max-width:1240px;margin:0 auto;padding:20px 16px 48px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px}
+@media (max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:0}
+.sec-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+h2{font:700 16px var(--display);margin:0}
+.sec-h span{color:var(--muted);font-size:12px}
+.banner{margin:12px 16px;padding:10px 12px;border-radius:6px;background:var(--sell-bg);color:var(--ink);font-size:13px}
+.empty{padding:32px 16px;color:var(--muted);text-align:center}
+ol.feed{list-style:none;margin:0;padding:0}
+.trade{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:4px 12px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:start}
+.trade.new{animation:flash 6s ease-out}
+@keyframes flash{0%{background:var(--flash)}100%{background:transparent}}
+.side{font:500 11px var(--mono);letter-spacing:.06em;text-align:center;padding:3px 0;border-radius:4px}
+.side.BUY{background:var(--buy-bg);color:var(--buy)}
+.side.SELL{background:var(--sell-bg);color:var(--sell)}
+.t-main{min-width:0}
+.t-who{font-weight:600}
+.t-who .wr{font:400 12px var(--mono);color:var(--muted);margin-left:6px}
+.t-q{color:var(--ink);overflow-wrap:anywhere}
+.t-q b{font-weight:600}
+.t-meta{font-size:12px;color:var(--muted)}
+.t-num{text-align:right;font:500 14px var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.t-num small{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.t-num a{font:500 12px var(--body)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th{font:500 11px var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;font:13px var(--mono)}
+td:first-child{font-family:var(--body);font-weight:500;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tr.pick{cursor:pointer}
+tr.pick:hover td{background:var(--bg)}
+tr.sel td{background:var(--buy-bg)}
+.filter{font-size:12px;color:var(--muted);padding:8px 16px;display:flex;gap:8px;align-items:center}
+.toast{position:fixed;right:16px;bottom:16px;z-index:9;display:flex;flex-direction:column;gap:8px;max-width:min(380px,calc(100vw - 32px))}
+.toast div{background:var(--ink);color:var(--bg);padding:12px 14px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:13px}
+.note{max-width:1240px;margin:0 auto;padding:0 16px 32px;color:var(--muted);font-size:12px}
+@media (prefers-reduced-motion:reduce){.trade.new,.dot.live{animation:none}}
+</style>
+</head>
+<body>
+<header class="bar"><div class="bar-in">
+  <h1>Copy Desk<small>34 reliable Polymarket traders</small></h1>
+  <div class="status"><span id="dot" class="dot"></span><span id="statusText">Starting…</span></div>
+  <div class="controls">
+    <label class="min" for="minBuy">Alert on buys over
+      <select id="minBuy"><option value="0">any size</option><option value="25">$25</option><option value="50">$50</option><option value="100">$100</option><option value="250">$250</option><option value="1000">$1,000</option></select>
+    </label>
+    <button class="btn" id="soundBtn" type="button">Sound off</button>
+    <button class="btn" id="notifyBtn" type="button">Desktop alerts off</button>
+  </div>
+</div></header>
+
+<main>
+  <section aria-labelledby="feedH">
+    <div class="sec-h"><h2 id="feedH">Live trades</h2><span id="feedCount"></span></div>
+    <div id="banner" class="banner" hidden></div>
+    <div id="filterRow" class="filter" hidden>Showing one trader only. <button class="btn" id="clearFilter" type="button">Show everyone</button></div>
+    <ol id="feed" class="feed"></ol>
+    <div id="empty" class="empty">Loading the latest trades from all 34 wallets…</div>
+  </section>
+  <section aria-labelledby="wlH">
+    <div class="sec-h"><h2 id="wlH">Watchlist</h2><span>tap a name to filter</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Trader</th><th title="Share of resolved bets won">Win</th><th title="Win rate minus average price paid, in points">Edge</th><th>Last trade</th></tr></thead>
+      <tbody id="wl"></tbody>
+    </table></div>
+  </section>
+</main>
+<p class="note">Checks every wallet about once a minute using Polymarket's public data. Win rate and edge come from bets bought between 5¢ and 95¢ (ranking from 2 Nov 2026). Keep this page open for alerts. Copying trades is your own call; past results don't guarantee future ones.</p>
+<div class="toast" id="toast" aria-live="polite"></div>
+
+<script>
+const WALLETS = [{"r":1,"n":"0x94d6\u2026f121","w":"0x94d6530c8d66cf9a789c7f2e6a9c4f2cb20cf121","b":127,"wr":0.89,"p":0.572,"e":31.8,"s":144,"pnl":47072},{"r":2,"n":"Beasts","w":"0xa4f60bc3887a08a908af9a5717a3c2dcea130070","b":58,"wr":0.776,"p":0.431,"e":34.5,"s":93,"pnl":81273},{"r":3,"n":"Sharky6999","w":"0x751a2b86cab503496efd325c8344e10159349ea1","b":303,"wr":0.772,"p":0.708,"e":6.4,"s":487,"pnl":26128},{"r":4,"n":"anothercoin","w":"0xc22b72b0fec23b797589ef6778bb6589e325deab","b":589,"wr":0.747,"p":0.644,"e":10.3,"s":24,"pnl":52723},{"r":5,"n":"Rocky31","w":"0x17d81f8299a2d694f98b813ebcf1ca42ac41b4a6","b":2011,"wr":0.733,"p":0.677,"e":5.6,"s":49,"pnl":70449},{"r":6,"n":"ropetard","w":"0x2c866881290c2197960f06448d3a236d9f20d939","b":145,"wr":0.731,"p":0.493,"e":23.8,"s":5305,"pnl":81894},{"r":7,"n":"influenz.eth","w":"0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86","b":747,"wr":0.728,"p":0.598,"e":13.1,"s":157,"pnl":141612},{"r":8,"n":"LonnieHawkinss","w":"0xa797d6bd8fe6e404bb4d8e4ab3d97c38336fdede","b":1103,"wr":0.719,"p":0.6,"e":11.9,"s":106,"pnl":186958},{"r":9,"n":"C03B","w":"0x40604cb1f958c03bea0b18aa43e4cb0d62f33ec3","b":752,"wr":0.717,"p":0.66,"e":5.7,"s":411,"pnl":261538},{"r":10,"n":"VictorLudorum","w":"0x090af6fd2aeb04202abc97370aa86c1b81d90fa6","b":759,"wr":0.714,"p":0.536,"e":17.8,"s":73,"pnl":426494},{"r":11,"n":"gesst","w":"0xadaf1c42e0a88e2942e7adfe559e30c1796bf9f2","b":295,"wr":0.692,"p":0.434,"e":25.7,"s":87,"pnl":39763},{"r":12,"n":"Starlord2","w":"0x7576e41bc6fce96d7bc4e9eb0c9d046d4c2654b6","b":147,"wr":0.687,"p":0.411,"e":27.7,"s":159,"pnl":67231},{"r":13,"n":"GAMBLINGISCANCER69","w":"0x9c56304c8840621ef4c1e707b4c7d708d09878d1","b":63,"wr":0.667,"p":0.46,"e":20.7,"s":3781,"pnl":357246},{"r":14,"n":"Runner109","w":"0x6a678ca367432d28cb6aa55bb6bc57d8f53bdf6f","b":552,"wr":0.623,"p":0.514,"e":10.9,"s":472,"pnl":10284},{"r":15,"n":"leegunner","w":"0xe542afd3881c4c330ba0ebbb603bb470b2ba0a37","b":2451,"wr":0.615,"p":0.482,"e":13.3,"s":120,"pnl":240864},{"r":16,"n":"ZhangMuZhi..","w":"0x84571f1bf97a5c710cbe51daff2dd4556cc887fd","b":231,"wr":0.61,"p":0.468,"e":14.2,"s":95,"pnl":1958024},{"r":17,"n":"0x7091\u202696f8","w":"0x709179e7392e59922ab2d73cb1141698b30096f8","b":4832,"wr":0.594,"p":0.508,"e":8.6,"s":164,"pnl":189514},{"r":18,"n":"HellsAngelx","w":"0x8ff04326388b1c024c45d7a7ffdd12cdedd0a0ed","b":226,"wr":0.593,"p":0.36,"e":23.3,"s":100,"pnl":709},{"r":19,"n":"tunatyler","w":"0xf1f9a438f2697381b4ac8eb283d6f4dd772d1245","b":1963,"wr":0.59,"p":0.519,"e":7.1,"s":280,"pnl":251096},{"r":20,"n":"betwick","w":"0xc851cd9bee7d262afd78674f861f9f576a12cd2a","b":579,"wr":0.585,"p":0.5,"e":8.6,"s":3030,"pnl":470061},{"r":21,"n":"0xfb07\u2026e2cc","w":"0xfb07f48542d2b655e9d0bf1cc92a8a6feee8e2cc","b":4343,"wr":0.573,"p":0.486,"e":8.6,"s":407,"pnl":1267680},{"r":22,"n":"RaphCrypto","w":"0x187365dee1866e49c87fba10734375615d5d37b6","b":252,"wr":0.571,"p":0.34,"e":23.2,"s":50,"pnl":4658},{"r":23,"n":"JJo","w":"0xc4086b708cd3a50880b7069add1a1a80000f4675","b":913,"wr":0.57,"p":0.512,"e":5.8,"s":595,"pnl":106853},{"r":24,"n":"AgricultureSecretary","w":"0x6ffb4354cbe6e0f9989e3b55564ec5fb8646a834","b":633,"wr":0.561,"p":0.469,"e":9.2,"s":461,"pnl":109531},{"r":25,"n":"comon119","w":"0xc3c3b3ef304ddbea39fa2246e683a71da5d0eec8","b":4732,"wr":0.56,"p":0.483,"e":7.7,"s":8316,"pnl":4432718},{"r":26,"n":"GayPride","w":"0x551e72eda42a5ab39d6d78239a1d9bbb5db6b0e0","b":629,"wr":0.552,"p":0.455,"e":9.7,"s":1371,"pnl":630329},{"r":27,"n":"noreasapa","w":"0x4ad6cadefae3c28f5b2caa32a99ebba3a614464c","b":122,"wr":0.541,"p":0.432,"e":10.9,"s":509,"pnl":117693},{"r":28,"n":"tripping","w":"0x6480542954b70a674a74bd1a6015dec362dc8dc5","b":386,"wr":0.492,"p":0.408,"e":8.4,"s":232,"pnl":2728},{"r":29,"n":"forgotmydinner","w":"0x4a0eecbf4d18cb6b868f30a7b6e75b7905b9a4b1","b":114,"wr":0.491,"p":0.254,"e":23.8,"s":680,"pnl":126636},{"r":30,"n":"ACara","w":"0x7ab6ac0f0d6ca5a15ec57abeaf413d31c8cdfa77","b":576,"wr":0.467,"p":0.232,"e":23.5,"s":88,"pnl":1936},{"r":31,"n":"CyberScore.live","w":"0x3413c803c3a6efc8d963afbce2dcee48d3738ff2","b":922,"wr":0.464,"p":0.411,"e":5.3,"s":5400,"pnl":243954},{"r":32,"n":"JohnnyWins","w":"0xda3407bec4c1f26d40afceb442de75b8260b01a8","b":347,"wr":0.447,"p":0.369,"e":7.8,"s":1496,"pnl":81638},{"r":33,"n":"TradingWave","w":"0xf49ce459b52f60b70ce0fe9aa6203e6bf90f9786","b":236,"wr":0.335,"p":0.249,"e":8.6,"s":1578,"pnl":75468},{"r":34,"n":"puipui2486","w":"0x70d94a4ff67ed919a8480885cf0808afefe7a684","b":645,"wr":0.298,"p":0.112,"e":18.5,"s":112,"pnl":1038537}];
+const API = "https://data-api.polymarket.com/v2/trades";
+const POLL_MS = 60000, MERGE_S = 180, KEEP = 400;
+const byWallet = Object.fromEntries(WALLETS.map(w => [w.w, w]));
+const seen = new Set();
+let trades = [];            // merged trade groups
+let lastTrade = {};         // wallet -> ts
+let filterWallet = null, startTs = Math.floor(Date.now()/1000), firstLoadDone = false;
+const store = { get(k,d){try{const v=localStorage.getItem("cd_"+k);return v==null?d:JSON.parse(v)}catch(e){return d}}, set(k,v){try{localStorage.setItem("cd_"+k,JSON.stringify(v))}catch(e){}} };
+let minBuy = store.get("minBuy", 50), soundOn = store.get("sound", false), notifyOn = false;
+const $ = id => document.getElementById(id);
+$("minBuy").value = String(minBuy);
+
+function money(x){return x>=1000?"$"+(x/1000).toFixed(x>=10000?0:1)+"k":"$"+x.toFixed(x<10?2:0)}
+function ago(ts){const s=Math.max(0,Date.now()/1000-ts);if(s<60)return Math.floor(s)+"s ago";if(s<3600)return Math.floor(s/60)+"m ago";if(s<86400)return Math.floor(s/3600)+"h ago";return Math.floor(s/86400)+"d ago"}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+function addFill(f){
+  const key = [f.transaction_hash,f.token_id,f.side,f.size,f.price].join("|");
+  if (seen.has(key)) return null;
+  seen.add(key);
+  const usd = f.size*f.price;
+  // merge with a recent group: same wallet, market outcome and side within MERGE_S seconds
+  const g = trades.find(t => t.w===f.proxy_wallet && t.token===f.token_id && t.side===f.side && Math.abs(t.ts-f.timestamp)<=MERGE_S);
+  if (g){ g.usd+=usd; g.size+=f.size; g.price=g.usd/g.size; g.ts=Math.max(g.ts,f.timestamp); g.fills++; return g; }
+  const t = {w:f.proxy_wallet, token:f.token_id, side:f.side, size:f.size, usd, price:f.price, ts:f.timestamp, title:f.title, outcome:f.outcome, slug:f.event_slug||f.slug, fills:1, isNew:false, alerted:false};
+  trades.push(t); return t;
+}
+
+async function fetchWallet(w){
+  const r = await fetch(`${API}?user=${w}&limit=25`);
+  if (!r.ok) throw new Error("HTTP "+r.status);
+  const d = await r.json();
+  return d.data || [];
+}
+
+async function pollAll(){
+  let ok=0, fail=0; const touched = new Set();
+  const queue = WALLETS.map(w=>w.w);
+  async function worker(){
+    while(queue.length){
+      const w = queue.shift();
+      try{
+        const rows = await fetchWallet(w); ok++;
+        for (const f of rows.sort((a,b)=>a.timestamp-b.timestamp)){
+          lastTrade[w] = Math.max(lastTrade[w]||0, f.timestamp);
+          const g = addFill(f); if (g) touched.add(g);
+        }
+      }catch(e){ fail++; }
+    }
+  }
+  await Promise.all(Array.from({length:4}, worker));
+  trades.sort((a,b)=>b.ts-a.ts); trades = trades.slice(0, KEEP);
+  if (firstLoadDone){
+    for (const g of touched){ if (g.ts >= startTs - 60){ g.isNew = true; maybeAlert(g); } }
+  }
+  firstLoadDone = true;
+  setStatus(ok, fail);
+  render();
+}
+
+function maybeAlert(g){
+  if (g.side!=="BUY" || g.usd < minBuy || g.alerted) return;
+  g.alerted = true;
+  const who = byWallet[g.w]?.n || g.w.slice(0,8);
+  const msg = `${who} bought ${money(g.usd)} of “${g.outcome}” at ${Math.round(g.price*100)}¢ on ${g.title}`;
+  toast(msg);
+  if (soundOn) beep();
+  if (notifyOn && "Notification" in window && Notification.permission==="granted"){
+    try{ new Notification("New buy: "+who, {body: msg.replace(who+" ","")}); }catch(e){}
+  }
+  unread++; document.title = `(${unread}) Copy Desk`;
+}
+let unread = 0;
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){unread=0;document.title="Polymarket Copy Desk";} });
+
+function toast(msg){
+  const el = document.createElement("div"); el.textContent = msg; $("toast").prepend(el);
+  setTimeout(()=>el.remove(), 12000);
+  while ($("toast").children.length>4) $("toast").lastChild.remove();
+}
+let actx=null;
+function beep(){
+  try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=actx.createOscillator(), g=actx.createGain(); o.connect(g); g.connect(actx.destination);
+    o.frequency.value=880; g.gain.setValueAtTime(.15,actx.currentTime); g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+.4);
+    o.start(); o.stop(actx.currentTime+.4);
+  }catch(e){}
+}
+
+function setStatus(ok, fail){
+  const dot=$("dot"), t=$("statusText"), b=$("banner");
+  const time = new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+  if (ok===0){
+    dot.className="dot err"; t.textContent="Can't reach Polymarket";
+    b.hidden=false; b.textContent="Couldn't load trades. Check your internet connection. If you opened this page inside an app preview, download it and open it in Chrome, Safari or Edge instead. It retries every minute.";
+  } else {
+    dot.className="dot live"; t.textContent=`Live · checked ${time}`+(fail?` · ${fail} wallets skipped`:"");
+    b.hidden=true;
+  }
+}
+
+function render(){
+  const list = (filterWallet ? trades.filter(t=>t.w===filterWallet) : trades).filter(t=>t.usd>=10);
+  $("filterRow").hidden = !filterWallet;
+  $("empty").hidden = list.length>0;
+  if (!list.length && firstLoadDone) $("empty").textContent = "No recent trades yet.";
+  $("feedCount").textContent = list.length ? `${list.length} recent trades over $10` : "";
+  $("feed").innerHTML = list.slice(0,150).map(t=>{
+    const w = byWallet[t.w] || {n:t.w.slice(0,8), wr:0};
+    const url = t.slug ? `https://polymarket.com/event/${encodeURIComponent(t.slug)}` : `https://polymarket.com/profile/${t.w}`;
+    return `<li class="trade${t.isNew?" new":""}">
+      <div class="side ${t.side}">${t.side}</div>
+      <div class="t-main">
+        <div class="t-who">${esc(w.n)}<span class="wr">${Math.round(w.wr*100)}% win</span></div>
+        <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
+        <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
+      </div>
+      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small><a href="${url}" target="_blank" rel="noopener">Open market</a></div>
+    </li>`;
+  }).join("");
+  for (const t of trades) t.isNew=false;
+  $("wl").innerHTML = WALLETS.map(w=>`<tr class="pick${filterWallet===w.w?" sel":""}" data-w="${w.w}" tabindex="0">
+      <td title="${esc(w.n)}">${esc(w.n)}</td><td>${Math.round(w.wr*100)}%</td><td>+${w.e.toFixed(0)}</td><td>${lastTrade[w.w]?ago(lastTrade[w.w]):"–"}</td></tr>`).join("");
+}
+
+$("wl").addEventListener("click", e=>{ const tr=e.target.closest("tr[data-w]"); if(!tr) return; filterWallet = filterWallet===tr.dataset.w?null:tr.dataset.w; render(); });
+$("wl").addEventListener("keydown", e=>{ if(e.key==="Enter"){ const tr=e.target.closest("tr[data-w]"); if(tr){filterWallet=filterWallet===tr.dataset.w?null:tr.dataset.w;render();} } });
+$("clearFilter").onclick = ()=>{ filterWallet=null; render(); };
+$("minBuy").onchange = e=>{ minBuy=+e.target.value; store.set("minBuy",minBuy); };
+function paintButtons(){
+  $("soundBtn").textContent = soundOn?"Sound on":"Sound off"; $("soundBtn").classList.toggle("on",soundOn);
+  $("notifyBtn").textContent = notifyOn?"Desktop alerts on":"Desktop alerts off"; $("notifyBtn").classList.toggle("on",notifyOn);
+}
+$("soundBtn").onclick = ()=>{ soundOn=!soundOn; store.set("sound",soundOn); if(soundOn) beep(); paintButtons(); };
+$("notifyBtn").onclick = async ()=>{
+  if (notifyOn){ notifyOn=false; paintButtons(); return; }
+  if (!("Notification" in window)){ toast("This browser can't show desktop alerts. You'll still get alerts on this page."); return; }
+  let p = Notification.permission;
+  try{ if (p==="default") p = await Notification.requestPermission(); }catch(e){}
+  if (p==="granted"){ notifyOn=true; toast("Desktop alerts are on."); }
+  else toast("Desktop alerts are blocked by your browser. You'll still get alerts on this page.");
+  paintButtons();
+};
+if ("Notification" in window && Notification.permission==="granted") notifyOn = true;
+paintButtons(); render();
+pollAll(); setInterval(pollAll, POLL_MS);
+setInterval(()=>{ if(firstLoadDone) render(); }, 30000);
+</script>
+</body>
+</html>
