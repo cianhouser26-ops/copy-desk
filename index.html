@@ -72,6 +72,9 @@ td.up{color:var(--buy)} td.down{color:var(--sell)}
 .t-num small{display:block;font-size:12px;color:var(--muted);font-weight:400}
 .now{display:block;font:500 12px var(--mono);margin-top:2px}
 .now.up{color:var(--buy)} .now.down{color:var(--sell)} .now.flat{color:var(--muted)}
+.us{display:block;font:500 12px var(--body);margin-top:2px}
+.us.none{color:var(--muted)}
+.us.pending{color:var(--muted);opacity:.7}
 .t-num a{font:500 12px var(--body)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th{padding-left:6px!important;padding-right:6px!important;white-space:nowrap;font:500 11px var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -101,6 +104,7 @@ tr.sel td{background:var(--buy-bg)}
     <label class="min" for="minBuy">Alert on trades over
       <select id="minBuy"><option value="0">any size</option><option value="25">$25</option><option value="50">$50</option><option value="100">$100</option><option value="250">$250</option><option value="1000">$1,000</option></select>
     </label>
+    <button class="btn" id="usBtn" type="button">All markets</button>
     <button class="btn" id="sellBtn" type="button">Sell alerts on</button>
     <button class="btn" id="soundBtn" type="button">Sound off</button>
     <button class="btn" id="notifyBtn" type="button">Desktop alerts off</button>
@@ -178,27 +182,93 @@ async function loadLive(){
   }));
   render();
 }
-// Link to the same market on Polymarket US. Polymarket US lists fewer markets than polymarket.com and
-// the two sites share no ids, so: game markets whose slug exists on the US site get a direct link
-// (checked through the public US API); everything else opens a Polymarket US search for the question.
-const usDirect = {};   // slug -> direct URL, or null when the US site has no such event
-function usSearch(t){ const q=(t.title||"").replace(/^Will\s+/i,"").replace(/\?$/,""); return `https://polymarket.us/search?q=${encodeURIComponent(q)}`; }
-function usUrl(t){ return usDirect[t.slug] || usSearch(t); }
+// ---- Polymarket US links ----------------------------------------------------------------
+// Polymarket US is a separate exchange with its own markets. For each trade we look up the game on
+// polymarket.com (gamma API), find the same game on Polymarket US by its shared sports game id, then
+// pick the matching market and side so the US page opens with that bet already on the slip
+// (?marketSlug=...&outcomeId=<side id>). Winner, spread and total bets map exactly; other bets on a
+// matched game open the game page; anything with no US match is marked "Not on Polymarket US".
+const US = "https://gateway.polymarket.us/v1";
+const intlEvents = {};  // polymarket.com event slug -> event (or null)
+const usEvents = {};    // polymarket.com event slug -> matched US event (or null)
+const usLink = {};      // trade key -> {url, exact} or null
+const norm = x => String(x||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+const lineSlug = x => String(Math.abs(+x)).replace(".","pt");
+function usPath(e){ const sport = e.gameId || e.sportradarGameId; return sport ? `https://polymarket.us/sports/${e.slug.split("-")[0]}/${e.slug}` : `https://polymarket.us/event/${e.slug}`; }
+async function getJSON(u){ const r = await fetch(u); if (r.status===404) return null; if (!r.ok) throw new Error(r.status); return r.json(); }
+async function intlEvent(slug){
+  if (!(slug in intlEvents)){ const d = await getJSON(`https://gamma-api.polymarket.com/events?slug=${encodeURIComponent(slug)}`); intlEvents[slug] = (d&&d[0])||null; }
+  return intlEvents[slug];
+}
+async function usEventFor(ie){
+  if (ie.slug in usEvents) return usEvents[ie.slug];
+  let found = null;
+  if (ie.gameId){
+    const q = (ie.teams||[]).map(t=>t.name).join(" ") || ie.title;
+    const d = await getJSON(`${US}/search?query=${encodeURIComponent(q)}&limit=20`);
+    const hit = (d?.events||[]).find(e => String(e.gameId||"")===String(ie.gameId));
+    if (hit) found = (await getJSON(`${US}/events/slug/${encodeURIComponent(hit.slug)}`))?.event || null;
+  } else {
+    // Non-game markets: accept only a US event with exactly the same title (a near match can be a
+    // different city, date or person, which would be the wrong bet).
+    const d = await getJSON(`${US}/search?query=${encodeURIComponent(ie.title)}&limit=10`);
+    const hit = (d?.events||[]).find(e => norm(e.title)===norm(ie.title));
+    if (hit) found = (await getJSON(`${US}/events/slug/${encodeURIComponent(hit.slug)}`))?.event || null;
+  }
+  usEvents[ie.slug] = found;
+  return found;
+}
+function sideMatches(side, outcome){
+  const o = norm(outcome), tm = side.team||{};
+  return [side.description, tm.name, tm.safeName, tm.alias, tm.abbreviation, tm.displayAbbreviation].some(v => v && norm(v)===o) ||
+         (tm.name && norm(tm.name).endsWith(" "+o));
+}
+function pickSide(ie, ue, t){
+  const im = (ie.markets||[]).find(m => m.conditionId===t.cond);
+  if (!im) return null;
+  const type = im.sportsMarketType, mk = slug => (ue.markets||[]).find(m => m.slug===slug);
+  let um = null;
+  if (!(ue.gameId || ue.sportradarGameId)){
+    // Non-game event with the same title: match the market by its option name (e.g. a candidate),
+    // or take the only market when both sites have just one.
+    const opt = norm(String(im.groupItemTitle||"").replace(/\s*\([^)]*\)\s*$/,""));
+    const ums = ue.markets||[];
+    um = (opt && ums.find(m => norm(m.title)===opt)) || ((ie.markets||[]).length===1 && ums.length===1 ? ums[0] : null);
+  }
+  else if (type==="moneyline") um = mk(`aec-${ue.slug}`);
+  else if (type==="totals" && im.line!=null) um = mk(`tsc-${ue.slug}-${lineSlug(im.line)}`);
+  else if (type==="spreads" && im.line!=null) um = mk(`asc-${ue.slug}-pos-${lineSlug(im.line)}`);
+  if (!um) return null;
+  const side = (um.marketSides||[]).find(sd => sideMatches(sd, t.outcome));
+  return side ? {um, side} : null;
+}
+async function linkFor(t){
+  const ie = await intlEvent(t.slug); if (!ie) return null;
+  const ue = await usEventFor(ie); if (!ue) return null;
+  const base = usPath(ue), pick = pickSide(ie, ue, t);
+  if (pick) return {url: `${base}?marketSlug=${encodeURIComponent(pick.um.slug)}&outcomeId=${encodeURIComponent(pick.side.id)}`, exact: true};
+  return {url: base, exact: false, game: !!(ue.gameId || ue.sportradarGameId)};
+}
+const tradeKey = t => `${t.slug}|${t.cond}|${t.outcome}`;
+let usBusy = false;
 async function resolveUs(){
-  const slugs = [...new Set(trades.slice(0,150).map(t=>t.slug))].filter(sl=>sl && !(sl in usDirect) && /^[a-z0-9]+-[a-z0-9-]+-\d{4}-\d{2}-\d{2}$/.test(sl)).slice(0,40);
-  if (!slugs.length) return;
-  await Promise.all(slugs.map(async sl=>{
-    try{
-      const r = await fetch(`https://gateway.polymarket.us/v1/events/slug/${encodeURIComponent(sl)}`);
-      if (r.status===404){ usDirect[sl]=null; return; }
-      const e = r.ok ? (await r.json()).event : null;
-      if (!e){ return; }
-      const sport = e.gameId || e.sportradarGameId;
-      usDirect[sl] = sport ? `https://polymarket.us/sports/${sl.split("-")[0]}/${sl}` : `https://polymarket.us/event/${sl}`;
-    }catch(e){}
-  }));
+  if (usBusy) return; usBusy = true;
+  try{
+    const todo = trades.filter(t=>t.usd>=10 && !hidden(t.w) && !sureBet(t)).slice(0,200).filter(t=>t.slug && !(tradeKey(t) in usLink));
+    const queue = [...new Map(todo.map(t=>[tradeKey(t),t])).values()];
+    async function worker(){ while(queue.length){ const t = queue.shift(); try{ usLink[tradeKey(t)] = await linkFor(t); }catch(e){} } }
+    await Promise.all(Array.from({length:6}, worker));
+  } finally { usBusy = false; }
   render();
 }
+function usButton(t){
+  const k = tradeKey(t);
+  if (!(k in usLink)) return `<span class="us pending">Checking Polymarket US…</span>`;
+  const L = usLink[k];
+  if (!L) return `<span class="us none" title="This market isn't listed on Polymarket US">Not on Polymarket US</span>`;
+  return `<a href="${L.url}" target="_blank" rel="noopener">${L.exact ? (t.side==="SELL"?"Open on US slip":"Bet on US slip") : (L.game ? "Open game on US" : "Open market on US")}</a>`;
+}
+function usOk(t){ const L = usLink[tradeKey(t)]; return !!L; }
 function pfText(x){ const a=Math.abs(x); const v=a>=1e6?(a/1e6).toFixed(1)+"M":a>=1000?(a/1000).toFixed(a>=10000?0:1)+"k":a.toFixed(0); return (x<0?"−$":"+$")+v; }
 function pfChip(x){ return x==null?"":`<span class="pf ${x<0?"down":"up"}" title="All-time profit">${pfText(x)}</span>`; }
 function pfCell(x){ return x==null?"<td>–</td>":`<td class="${x<0?"down":"up"}">${pfText(x)}</td>`; }
@@ -260,7 +330,7 @@ let trades = [];            // merged trade groups
 let lastTrade = {};         // wallet -> ts
 let filterWallet = null, startTs = Math.floor(Date.now()/1000), firstLoadDone = false;
 const store = { get(k,d){try{const v=localStorage.getItem("cd_"+k);return v==null?d:JSON.parse(v)}catch(e){return d}}, set(k,v){try{localStorage.setItem("cd_"+k,JSON.stringify(v))}catch(e){}} };
-let showMode = store.get("showMode", "strict"), minBuy = store.get("minBuy", 50), soundOn = store.get("sound", false), sellOn = store.get("sell", true), notifyOn = false;
+let showMode = store.get("showMode", "strict"), minBuy = store.get("minBuy", 50), soundOn = store.get("sound", false), sellOn = store.get("sell", true), usOnly = store.get("usOnly", false), notifyOn = false;
 const $ = id => document.getElementById(id);
 $("minBuy").value = String(minBuy);
 
@@ -276,7 +346,7 @@ function addFill(f){
   // merge with a recent group: same wallet, market outcome and side within MERGE_S seconds
   const g = trades.find(t => t.w===f.proxy_wallet && t.token===f.token_id && t.side===f.side && Math.abs(t.ts-f.timestamp)<=MERGE_S);
   if (g){ g.usd+=usd; g.size+=f.size; g.price=g.usd/g.size; g.ts=Math.max(g.ts,f.timestamp); g.fills++; return g; }
-  const t = {w:f.proxy_wallet, token:f.token_id, side:f.side, size:f.size, usd, price:f.price, ts:f.timestamp, title:f.title, outcome:f.outcome, slug:f.event_slug||f.slug, fills:1, isNew:false, alerted:false};
+  const t = {w:f.proxy_wallet, token:f.token_id, side:f.side, size:f.size, usd, price:f.price, ts:f.timestamp, title:f.title, outcome:f.outcome, slug:f.event_slug||f.slug, cond:f.condition_id, fills:1, isNew:false, alerted:false};
   trades.push(t); return t;
 }
 
@@ -314,10 +384,15 @@ async function pollAll(){
   resolveUs();
 }
 
-function maybeAlert(g){
+async function maybeAlert(g){
   if (g.usd < minBuy || g.alerted || hidden(g.w) || sureBet(g)) return;
   if (g.side==="SELL" && !sellOn) return;
   g.alerted = true;
+  if (usOnly){ // only alert for bets you can place on Polymarket US
+    const k = tradeKey(g);
+    if (!(k in usLink)){ try{ usLink[k] = await linkFor(g); }catch(e){ usLink[k] = null; } }
+    if (!usLink[k]) return;
+  }
   const who = byWallet[g.w]?.n || g.w.slice(0,8);
   const verb = g.side==="SELL" ? "sold" : "bought";
   const bx = bigX(g);
@@ -359,7 +434,7 @@ function setStatus(ok, fail){
 }
 
 function render(){
-  const list = (filterWallet ? trades.filter(t=>t.w===filterWallet) : trades).filter(t=>t.usd>=10 && !hidden(t.w) && !sureBet(t));
+  const list = (filterWallet ? trades.filter(t=>t.w===filterWallet) : trades).filter(t=>t.usd>=10 && !hidden(t.w) && !sureBet(t) && (!usOnly || usOk(t)));
   const hr = w => stat(w.w)&&stat(w.w).total ? stat(w.w).won/stat(w.w).total : 0;
   const shown = WALLETS.filter(w=>!hidden(w.w)).sort((a,b)=>hr(b)-hr(a)), nHidden = WALLETS.length - shown.length;
   $("sub").textContent = `${shown.length} trusted traders` + (nHidden ? ` · ${nHidden} hidden for now` : "") + (showMode==="strict" ? " · 90¢+ bets hidden" : "");
@@ -369,7 +444,6 @@ function render(){
   $("feedCount").textContent = list.length ? `${list.length} recent trades over $10` : "";
   $("feed").innerHTML = list.slice(0,150).map(t=>{
     const w = byWallet[t.w] || {n:t.w.slice(0,8), wr:0};
-    const url = usUrl(t);
     const bx = bigX(t);
     return `<li class="trade${t.isNew?" new":""}${bx?" big":""}">
       <div class="side ${t.side}">${t.side}</div>
@@ -378,7 +452,7 @@ function render(){
         <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
         <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
       </div>
-      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small>${nowHtml(t)}<a href="${url}" target="_blank" rel="noopener">${usDirect[t.slug]?"Open on Polymarket US":"Find on Polymarket US"}</a></div>
+      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small>${nowHtml(t)}${usButton(t)}</div>
     </li>`;
   }).join("");
   for (const t of trades) t.isNew=false;
@@ -393,10 +467,12 @@ $("showMode").value = showMode;
 $("showMode").onchange = e=>{ showMode=e.target.value; store.set("showMode",showMode); if(filterWallet&&hidden(filterWallet)) filterWallet=null; render(); };
 $("minBuy").onchange = e=>{ minBuy=+e.target.value; store.set("minBuy",minBuy); };
 function paintButtons(){
+  $("usBtn").textContent = usOnly?"Polymarket US only":"All markets"; $("usBtn").classList.toggle("on",usOnly);
   $("sellBtn").textContent = sellOn?"Sell alerts on":"Sell alerts off"; $("sellBtn").classList.toggle("on",sellOn);
   $("soundBtn").textContent = soundOn?"Sound on":"Sound off"; $("soundBtn").classList.toggle("on",soundOn);
   $("notifyBtn").textContent = notifyOn?"Desktop alerts on":"Desktop alerts off"; $("notifyBtn").classList.toggle("on",notifyOn);
 }
+$("usBtn").onclick = ()=>{ usOnly=!usOnly; store.set("usOnly",usOnly); paintButtons(); render(); };
 $("sellBtn").onclick = ()=>{ sellOn=!sellOn; store.set("sell",sellOn); paintButtons(); };
 $("soundBtn").onclick = ()=>{ soundOn=!soundOn; store.set("sound",soundOn); if(soundOn) beep(); paintButtons(); };
 $("notifyBtn").onclick = async ()=>{
