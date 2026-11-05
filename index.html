@@ -171,6 +171,27 @@ async function loadLive(){
   }));
   render();
 }
+// Link to the same market on Polymarket US. Polymarket US lists fewer markets than polymarket.com and
+// the two sites share no ids, so: game markets whose slug exists on the US site get a direct link
+// (checked through the public US API); everything else opens a Polymarket US search for the question.
+const usDirect = {};   // slug -> direct URL, or null when the US site has no such event
+function usSearch(t){ const q=(t.title||"").replace(/^Will\s+/i,"").replace(/\?$/,""); return `https://polymarket.us/search?q=${encodeURIComponent(q)}`; }
+function usUrl(t){ return usDirect[t.slug] || usSearch(t); }
+async function resolveUs(){
+  const slugs = [...new Set(trades.slice(0,150).map(t=>t.slug))].filter(sl=>sl && !(sl in usDirect) && /^[a-z0-9]+-[a-z0-9-]+-\d{4}-\d{2}-\d{2}$/.test(sl)).slice(0,40);
+  if (!slugs.length) return;
+  await Promise.all(slugs.map(async sl=>{
+    try{
+      const r = await fetch(`https://gateway.polymarket.us/v1/events/slug/${encodeURIComponent(sl)}`);
+      if (r.status===404){ usDirect[sl]=null; return; }
+      const e = r.ok ? (await r.json()).event : null;
+      if (!e){ return; }
+      const sport = e.gameId || e.sportradarGameId;
+      usDirect[sl] = sport ? `https://polymarket.us/sports/${sl.split("-")[0]}/${sl}` : `https://polymarket.us/event/${sl}`;
+    }catch(e){}
+  }));
+  render();
+}
 function pfText(x){ const a=Math.abs(x); const v=a>=1e6?(a/1e6).toFixed(1)+"M":a>=1000?(a/1000).toFixed(a>=10000?0:1)+"k":a.toFixed(0); return (x<0?"−$":"+$")+v; }
 function pfChip(x){ return x==null?"":`<span class="pf ${x<0?"down":"up"}" title="All-time profit">${pfText(x)}</span>`; }
 function pfCell(x){ return x==null?"<td>–</td>":`<td class="${x<0?"down":"up"}">${pfText(x)}</td>`; }
@@ -280,6 +301,7 @@ async function pollAll(){
   setStatus(ok, fail);
   render();
   loadLive();
+  resolveUs();
 }
 
 function maybeAlert(g){
@@ -337,7 +359,7 @@ function render(){
   $("feedCount").textContent = list.length ? `${list.length} recent trades over $10` : "";
   $("feed").innerHTML = list.slice(0,150).map(t=>{
     const w = byWallet[t.w] || {n:t.w.slice(0,8), wr:0};
-    const url = t.slug ? `https://polymarket.com/event/${encodeURIComponent(t.slug)}` : `https://polymarket.com/profile/${t.w}`;
+    const url = usUrl(t);
     const bx = bigX(t);
     return `<li class="trade${t.isNew?" new":""}${bx?" big":""}">
       <div class="side ${t.side}">${t.side}</div>
@@ -346,7 +368,7 @@ function render(){
         <div class="t-q"><b>${esc(t.outcome)}</b> · ${esc(t.title)}</div>
         <div class="t-meta">${ago(t.ts)}${t.fills>1?` · ${t.fills} fills`:""} · <a href="https://polymarket.com/profile/${t.w}" target="_blank" rel="noopener">profile</a></div>
       </div>
-      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small>${nowHtml(t)}<a href="${url}" target="_blank" rel="noopener">Open market</a></div>
+      <div class="t-num">${money(t.usd)}<small>at ${(t.price*100).toFixed(1)}¢</small>${nowHtml(t)}<a href="${url}" target="_blank" rel="noopener">${usDirect[t.slug]?"Open on Polymarket US":"Find on Polymarket US"}</a></div>
     </li>`;
   }).join("");
   for (const t of trades) t.isNew=false;
